@@ -4,13 +4,14 @@
 - Basic HTTP server
 - Repository list
 - Git smart HTTP
-- Simple repository view page
-- **Recent commits list** (last 10 commits on the repo page)
+- Repository view page
+- Recent commits
+- **Basic file tree at HEAD**
 
 ## Possible next chunks
-1. Basic file tree / blob view
-2. Create-repository form
-3. Show author on commits (already parsed, just not displayed yet)
-4. Very light polish or README rendering
+1. Click a file to view its content (blob view)
+2. Navigate into directories
+3. Create-repository form
+4. Render README.md when present
 
-The forge is already useful for day-to-day hosting and browsing.
+The forge now shows both the file list and recent history on each repository page.

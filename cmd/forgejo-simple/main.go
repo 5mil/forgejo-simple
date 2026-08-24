@@ -20,6 +20,13 @@ type Commit struct {
 	Date    string
 }
 
+type TreeEntry struct {
+	Mode string
+	Type string // "blob" or "tree"
+	Hash string
+	Name string
+}
+
 func main() {
 	addr := flag.String("addr", ":3000", "HTTP listen address")
 	dataDir := flag.String("data", "./data", "Directory that holds Git repositories")
@@ -127,7 +134,6 @@ func fileExists(path string) bool {
 }
 
 func recentCommits(repoPath string, n int) []Commit {
-	// format: hash<TAB>subject<TAB>author<TAB>date
 	cmd := exec.Command("git", "log", fmt.Sprintf("-%d", n), "--pretty=format:%h%x09%s%x09%an%x09%ad", "--date=short")
 	cmd.Dir = repoPath
 	out, err := cmd.Output()
@@ -154,6 +160,39 @@ func recentCommits(repoPath string, n int) []Commit {
 	return commits
 }
 
+func listTree(repoPath string) []TreeEntry {
+	// git ls-tree HEAD
+	cmd := exec.Command("git", "ls-tree", "HEAD")
+	cmd.Dir = repoPath
+	out, err := cmd.Output()
+	if err != nil {
+		return nil
+	}
+
+	var entries []TreeEntry
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		if line == "" {
+			continue
+		}
+		// format: <mode> <type> <hash>\t<name>
+		parts := strings.SplitN(line, "\t", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		meta := strings.Fields(parts[0])
+		if len(meta) < 3 {
+			continue
+		}
+		entries = append(entries, TreeEntry{
+			Mode: meta[0],
+			Type: meta[1],
+			Hash: meta[2],
+			Name: parts[1],
+		})
+	}
+	return entries
+}
+
 func renderHome(w http.ResponseWriter, dataDir string, repos []string) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	tmpl := template.Must(template.New("home").Parse(homeTmpl))
@@ -170,6 +209,7 @@ func renderRepo(w http.ResponseWriter, name, repoPath string) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 
 	commits := recentCommits(repoPath, 10)
+	tree := listTree(repoPath)
 	cloneURL := fmt.Sprintf("/git/%s", name)
 
 	tmpl := template.Must(template.New("repo").Parse(repoTmpl))
@@ -178,11 +218,13 @@ func renderRepo(w http.ResponseWriter, name, repoPath string) {
 		CloneURL string
 		RepoPath string
 		Commits  []Commit
+		Tree     []TreeEntry
 	}{
 		Name:     name,
 		CloneURL: cloneURL,
 		RepoPath: repoPath,
 		Commits:  commits,
+		Tree:     tree,
 	}
 	if err := tmpl.Execute(w, data); err != nil {
 		log.Printf("template error: %v", err)
@@ -246,7 +288,9 @@ const repoTmpl = `<!DOCTYPE html>
     td { padding: 0.4rem 0.5rem 0.4rem 0; border-bottom: 1px solid #eee; vertical-align: top; }
     td.hash { width: 5.5rem; font-family: ui-monospace, monospace; color: #666; }
     td.date { width: 6.5rem; color: #666; white-space: nowrap; }
+    td.mode { width: 4.5rem; font-family: ui-monospace, monospace; color: #666; }
     .empty { color: #666; }
+    .dir { font-weight: 500; }
   </style>
 </head>
 <body>
@@ -257,6 +301,20 @@ const repoTmpl = `<!DOCTYPE html>
     <strong>Clone</strong><br>
     <code>git clone http://localhost:3000{{.CloneURL}}</code>
   </div>
+
+  <h2>Files</h2>
+  {{if .Tree}}
+  <table>
+    {{range .Tree}}
+    <tr>
+      <td class="mode">{{if eq .Type "tree"}}dir{{else}}file{{end}}</td>
+      <td class="{{if eq .Type "tree"}}dir{{end}}">{{.Name}}</td>
+    </tr>
+    {{end}}
+  </table>
+  {{else}}
+  <p class="empty">No files at HEAD (empty repository?).</p>
+  {{end}}
 
   <h2>Recent commits</h2>
   {{if .Commits}}
