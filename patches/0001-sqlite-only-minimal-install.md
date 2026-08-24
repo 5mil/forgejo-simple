@@ -1,33 +1,54 @@
 # Patch 0001 – SQLite-only + Minimal Install Wizard
 
-This document describes the exact changes needed in upstream Forgejo (v16.x) to implement the first simplification.
+Target: Forgejo v16.x
 
-## 1. templates/install.tmpl (or equivalent)
+## Goal
+Reduce the install page from ~15 fields to 4 visible fields and force SQLite.
 
-Replace the large database + server settings form with a minimal version:
+---
+
+## 1. Install Template (before → after)
+
+### Before (simplified view of current upstream)
+- Database type dropdown (MySQL / PostgreSQL / SQLite / …)
+- Host, Username, Password, Database name
+- Instance title, slogan
+- Repository root path, LFS path
+- User to run as
+- Domain, SSH port, HTTP port, App URL
+- Log paths, etc.
+- Admin account fields
+
+### After (what we want)
+
+Only these visible fields:
 
 ```html
-<form method="post" action="{{AppSubUrl}}/install">
+<form method="post">
   {{.CsrfTokenHtml}}
 
-  <h2>Instance</h2>
-  <label>Title</label>
-  <input name="app_name" value="Forgejo Simple" required>
+  <fieldset>
+    <legend>Instance</legend>
+    <label>Title</label>
+    <input name="app_name" value="Forgejo Simple" required>
+  </fieldset>
 
-  <h2>Administrator Account</h2>
-  <label>Username</label>
-  <input name="admin_name" required>
+  <fieldset>
+    <legend>Administrator</legend>
+    <label>Username</label>
+    <input name="admin_name" required autocomplete="username">
 
-  <label>Password</label>
-  <input type="password" name="admin_passwd" required>
+    <label>Password</label>
+    <input type="password" name="admin_passwd" required autocomplete="new-password">
 
-  <label>Confirm Password</label>
-  <input type="password" name="admin_confirm_passwd" required>
+    <label>Confirm Password</label>
+    <input type="password" name="admin_confirm_passwd" required autocomplete="new-password">
 
-  <label>Email (optional)</label>
-  <input type="email" name="admin_email">
+    <label>Email (optional)</label>
+    <input type="email" name="admin_email" autocomplete="email">
+  </fieldset>
 
-  <!-- Hidden defaults -->
+  <!-- All other values become hidden defaults -->
   <input type="hidden" name="db_type" value="sqlite3">
   <input type="hidden" name="db_path" value="data/forgejo.db">
   <input type="hidden" name="repo_root_path" value="data/forgejo-repositories">
@@ -38,60 +59,70 @@ Replace the large database + server settings form with a minimal version:
   <input type="hidden" name="http_port" value="3000">
   <input type="hidden" name="app_url" value="http://localhost:3000/">
 
-  <button type="submit">Install Forgejo Simple</button>
+  <button type="submit">Install</button>
 </form>
 ```
 
-## 2. routers/install/install.go
+---
 
-- Force `db_type = "sqlite3"` regardless of form input.
-- Skip all MySQL/Postgres connection tests.
-- Only validate admin username + password + password confirmation.
-- Write a minimal app.ini with SQLite settings only.
+## 2. Install Handler (Go) – key changes
 
-Key logic change (pseudo):
+### Before
+- Reads `db_type` from form
+- Runs different connection tests for MySQL / Postgres / SQLite
+- Validates many optional fields
+
+### After (logic we want)
 
 ```go
-func InstallPost(ctx *context.Context) {
-    // Force SQLite
-    form.DbType = "sqlite3"
-    form.DbPath = filepath.Join(setting.AppDataPath, "forgejo.db")
+// Force SQLite regardless of anything else
+form.DbType = "sqlite3"
+form.DbPath = filepath.Join(setting.AppDataPath, "forgejo.db")
 
-    // Only require these
-    if form.AdminName == "" || form.AdminPasswd == "" {
-        // error
-    }
-    if form.AdminPasswd != form.AdminConfirmPasswd {
-        // error
-    }
-
-    // Generate minimal config and create admin user
-    // ...
+// Only validate the fields we still show
+if form.AdminName == "" {
+    ctx.RenderWithErr("Admin username is required", tplInstall, &form)
+    return
 }
+if form.AdminPasswd == "" || form.AdminPasswd != form.AdminConfirmPasswd {
+    ctx.RenderWithErr("Password is required and must match", tplInstall, &form)
+    return
+}
+
+// Skip all MySQL/Postgres connection logic
+// Generate minimal app.ini and create the admin user
 ```
 
-## 3. Default app.ini generation
+---
 
-Always produce:
+## 3. Generated app.ini (result)
 
 ```ini
-[database]
-DB_TYPE = sqlite3
-PATH = data/forgejo.db
+APP_NAME = Forgejo Simple
+RUN_MODE = prod
 
 [server]
-DOMAIN = localhost
+DOMAIN    = localhost
 HTTP_PORT = 3000
-ROOT_URL = http://localhost:3000/
+ROOT_URL  = http://localhost:3000/
+
+[database]
+DB_TYPE = sqlite3
+PATH    = data/forgejo.db
 
 [repository]
 ROOT = data/forgejo-repositories
 
 [lfs]
 PATH = data/lfs
+
+[security]
+INSTALL_LOCK = true
 ```
 
-## Result
+---
 
-Install page goes from ~15 fields to 4 visible fields.  
-One click → working forge.
+## Success criteria for this patch
+- Install page shows only 4 fields
+- No database type selection appears
+- After clicking Install the instance is immediately usable with SQLite
