@@ -29,6 +29,12 @@ type TreeEntry struct {
 	Name string
 }
 
+// Crumb is one segment of a breadcrumb trail.
+type Crumb struct {
+	Name string
+	Href string // empty = current (non-link) segment
+}
+
 var validRepoName = regexp.MustCompile(`^[a-zA-Z0-9._-]+$`)
 
 func main() {
@@ -60,10 +66,9 @@ func main() {
 			http.Error(w, "failed to list repositories", http.StatusInternalServerError)
 			return
 		}
-		renderHome(w, absoluteData, repos, "")
+		renderHome(w, absoluteData, repos)
 	})
 
-	// Create repository
 	mux.HandleFunc("/new", func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:
@@ -78,7 +83,6 @@ func main() {
 				renderNew(w, "name is required")
 				return
 			}
-			// Allow optional .git suffix; store without forcing it
 			name = strings.TrimSuffix(name, ".git")
 			if !validRepoName.MatchString(name) {
 				renderNew(w, "name may only contain letters, numbers, dots, underscores and hyphens")
@@ -197,12 +201,12 @@ func listRepos(dataDir string) ([]string, error) {
 	return repos, nil
 }
 
-func isGitRepo(path string) bool {
-	return fileExists(filepath.Join(path, "HEAD")) || fileExists(filepath.Join(path, ".git"))
+func isGitRepo(p string) bool {
+	return fileExists(filepath.Join(p, "HEAD")) || fileExists(filepath.Join(p, ".git"))
 }
 
-func fileExists(path string) bool {
-	_, err := os.Stat(path)
+func fileExists(p string) bool {
+	_, err := os.Stat(p)
 	return err == nil
 }
 
@@ -222,12 +226,7 @@ func recentCommits(repoPath string, n int) []Commit {
 		if len(parts) < 4 {
 			continue
 		}
-		commits = append(commits, Commit{
-			Hash:    parts[0],
-			Subject: parts[1],
-			Author:  parts[2],
-			Date:    parts[3],
-		})
+		commits = append(commits, Commit{Hash: parts[0], Subject: parts[1], Author: parts[2], Date: parts[3]})
 	}
 	return commits
 }
@@ -256,13 +255,7 @@ func listTree(repoPath, treePath string) []TreeEntry {
 		if len(meta) < 3 {
 			continue
 		}
-		name := path.Base(parts[1])
-		entries = append(entries, TreeEntry{
-			Mode: meta[0],
-			Type: meta[1],
-			Hash: meta[2],
-			Name: name,
-		})
+		entries = append(entries, TreeEntry{Mode: meta[0], Type: meta[1], Hash: meta[2], Name: path.Base(parts[1])})
 	}
 	return entries
 }
@@ -278,91 +271,83 @@ func getBlob(repoPath, filePath string) (string, error) {
 }
 
 func tryReadme(repoPath string) (string, string) {
-	candidates := []string{"README.md", "Readme.md", "readme.md", "README", "README.txt"}
-	for _, name := range candidates {
-		content, err := getBlob(repoPath, name)
-		if err == nil {
+	for _, name := range []string{"README.md", "Readme.md", "readme.md", "README", "README.txt"} {
+		if content, err := getBlob(repoPath, name); err == nil {
 			return name, content
 		}
 	}
 	return "", ""
 }
 
-func renderHome(w http.ResponseWriter, dataDir string, repos []string, msg string) {
+// breadcrumbs builds a trail: Repo > dir1 > dir2 > current
+// kind is "tree" or "blob".
+func breadcrumbs(repoName, filePath, kind string) []Crumb {
+	crumbs := []Crumb{{Name: repoName, Href: "/repo/" + repoName}}
+	if filePath == "" {
+		return crumbs
+	}
+	parts := strings.Split(filePath, "/")
+	acc := ""
+	for i, p := range parts {
+		if acc == "" {
+			acc = p
+		} else {
+			acc = acc + "/" + p
+		}
+		isLast := i == len(parts)-1
+		if isLast && kind == "blob" {
+			crumbs = append(crumbs, Crumb{Name: p, Href: ""}) // current file, not a link
+		} else if isLast && kind == "tree" {
+			crumbs = append(crumbs, Crumb{Name: p, Href: ""})
+		} else {
+			crumbs = append(crumbs, Crumb{Name: p, Href: "/repo/" + repoName + "/tree/" + acc})
+		}
+	}
+	return crumbs
+}
+
+func renderHome(w http.ResponseWriter, dataDir string, repos []string) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	tmpl := template.Must(template.New("home").Parse(homeTmpl))
-	data := struct {
+	_ = tmpl.Execute(w, struct {
 		DataDir string
 		Repos  []string
-		Msg     string
-	}{dataDir, repos, msg}
-	if err := tmpl.Execute(w, data); err != nil {
-		log.Printf("template error: %v", err)
-	}
+	}{dataDir, repos})
 }
 
 func renderNew(w http.ResponseWriter, errMsg string) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	tmpl := template.Must(template.New("new").Parse(newTmpl))
-	data := struct{ Error string }{errMsg}
-	if err := tmpl.Execute(w, data); err != nil {
-		log.Printf("template error: %v", err)
-	}
+	_ = tmpl.Execute(w, struct{ Error string }{errMsg})
 }
 
 func renderRepo(w http.ResponseWriter, name, repoPath string) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-
-	commits := recentCommits(repoPath, 10)
-	tree := listTree(repoPath, "")
-	readmeName, readmeContent := tryReadme(repoPath)
-	cloneURL := fmt.Sprintf("/git/%s", name)
-
 	tmpl := template.Must(template.New("repo").Parse(repoTmpl))
-	data := struct {
-		Name          string
-		CloneURL      string
-		RepoPath      string
-		Commits       []Commit
-		Tree          []TreeEntry
-		ReadmeName    string
-		ReadmeContent string
+	_ = tmpl.Execute(w, struct {
+		Name, CloneURL, RepoPath, ReadmeName, ReadmeContent string
+		Commits                                             []Commit
+		Tree                                                []TreeEntry
 	}{
-		Name:          name,
-		CloneURL:      cloneURL,
-		RepoPath:      repoPath,
-		Commits:       commits,
-		Tree:          tree,
-		ReadmeName:    readmeName,
-		ReadmeContent: readmeContent,
-	}
-	if err := tmpl.Execute(w, data); err != nil {
-		log.Printf("template error: %v", err)
-	}
+		Name: name, CloneURL: "/git/" + name, RepoPath: repoPath,
+		Commits: recentCommits(repoPath, 10), Tree: listTree(repoPath, ""),
+		ReadmeName: func() string { n, _ := tryReadme(repoPath); return n }(),
+		ReadmeContent: func() string { _, c := tryReadme(repoPath); return c }(),
+	})
 }
 
 func renderTree(w http.ResponseWriter, repoName, repoPath, treePath string) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	tree := listTree(repoPath, treePath)
-
 	tmpl := template.Must(template.New("tree").Parse(treeTmpl))
-	data := struct {
-		RepoName string
-		TreePath string
-		Tree     []TreeEntry
-		Parent   string
+	_ = tmpl.Execute(w, struct {
+		RepoName, TreePath string
+		Tree               []TreeEntry
+		Crumbs             []Crumb
 	}{
-		RepoName: repoName,
-		TreePath: treePath,
-		Tree:     tree,
-		Parent:   path.Dir(treePath),
-	}
-	if data.Parent == "." {
-		data.Parent = ""
-	}
-	if err := tmpl.Execute(w, data); err != nil {
-		log.Printf("template error: %v", err)
-	}
+		RepoName: repoName, TreePath: treePath,
+		Tree: listTree(repoPath, treePath),
+		Crumbs: breadcrumbs(repoName, treePath, "tree"),
+	})
 }
 
 func renderBlob(w http.ResponseWriter, repoName, repoPath, filePath string) {
@@ -371,282 +356,160 @@ func renderBlob(w http.ResponseWriter, repoName, repoPath, filePath string) {
 		http.Error(w, "file not found", http.StatusNotFound)
 		return
 	}
-
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	tmpl := template.Must(template.New("blob").Parse(blobTmpl))
-	data := struct {
-		RepoName string
-		FilePath string
-		Content  string
-		Parent   string
+	_ = tmpl.Execute(w, struct {
+		RepoName, FilePath, Content string
+		Crumbs                      []Crumb
 	}{
-		RepoName: repoName,
-		FilePath: filePath,
-		Content:  content,
-		Parent:   path.Dir(filePath),
-	}
-	if data.Parent == "." {
-		data.Parent = ""
-	}
-	if err := tmpl.Execute(w, data); err != nil {
-		log.Printf("template error: %v", err)
-	}
+		RepoName: repoName, FilePath: filePath, Content: content,
+		Crumbs: breadcrumbs(repoName, filePath, "blob"),
+	})
 }
 
 const homeTmpl = `<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>forgejo-simple</title>
-  <style>
-    :root { font-family: system-ui, -apple-system, sans-serif; }
-    body { max-width: 42rem; margin: 2rem auto; padding: 0 1rem; color: #222; }
-    h1 { font-size: 1.4rem; margin-bottom: 0.25rem; }
-    .meta { color: #666; font-size: 0.9rem; margin-bottom: 1.5rem; }
-    ul { list-style: none; padding: 0; }
-    li { padding: 0.6rem 0; border-bottom: 1px solid #eee; }
-    a { color: #0969da; text-decoration: none; }
-    a:hover { text-decoration: underline; }
-    .empty { color: #666; }
-    code { background: #f6f8fa; padding: 0.15em 0.4em; border-radius: 4px; font-size: 0.85em; }
-    .actions { margin-bottom: 1.5rem; }
-    .btn { display: inline-block; background: #0969da; color: #fff; padding: 0.4rem 0.8rem; border-radius: 6px; font-size: 0.9rem; text-decoration: none; }
-    .btn:hover { background: #0550ae; color: #fff; text-decoration: none; }
-  </style>
-</head>
-<body>
-  <h1>forgejo-simple</h1>
-  <p class="meta">Minimal Git forge &middot; data: <code>{{.DataDir}}</code></p>
-
-  <div class="actions">
-    <a class="btn" href="/new">New repository</a>
-  </div>
-
-  {{if .Repos}}
-  <ul>
-    {{range .Repos}}
-    <li><a href="/repo/{{.}}">{{.}}</a></li>
-    {{end}}
-  </ul>
-  {{else}}
-  <p class="empty">No repositories found.</p>
-  <p class="empty">Create one with the button above, or:<br>
-  <code>git init --bare {{.DataDir}}/myproject.git</code></p>
-  {{end}}
-</body>
-</html>`
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>forgejo-simple</title>
+<style>
+:root{font-family:system-ui,-apple-system,sans-serif}
+body{max-width:42rem;margin:2rem auto;padding:0 1rem;color:#222}
+h1{font-size:1.4rem;margin-bottom:.25rem}
+.meta{color:#666;font-size:.9rem;margin-bottom:1.5rem}
+ul{list-style:none;padding:0}
+li{padding:.6rem 0;border-bottom:1px solid #eee}
+a{color:#0969da;text-decoration:none}a:hover{text-decoration:underline}
+.empty{color:#666}code{background:#f6f8fa;padding:.15em .4em;border-radius:4px;font-size:.85em}
+.actions{margin-bottom:1.5rem}
+.btn{display:inline-block;background:#0969da;color:#fff;padding:.4rem .8rem;border-radius:6px;font-size:.9rem;text-decoration:none}
+.btn:hover{background:#0550ae;color:#fff;text-decoration:none}
+</style></head><body>
+<h1>forgejo-simple</h1>
+<p class="meta">Minimal Git forge &middot; data: <code>{{.DataDir}}</code></p>
+<div class="actions"><a class="btn" href="/new">New repository</a></div>
+{{if .Repos}}<ul>{{range .Repos}}<li><a href="/repo/{{.}}">{{.}}</a></li>{{end}}</ul>
+{{else}}<p class="empty">No repositories found.</p>
+<p class="empty">Create one with the button above, or:<br><code>git init --bare {{.DataDir}}/myproject.git</code></p>{{end}}
+</body></html>`
 
 const newTmpl = `<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>New repository · forgejo-simple</title>
-  <style>
-    :root { font-family: system-ui, -apple-system, sans-serif; }
-    body { max-width: 28rem; margin: 2rem auto; padding: 0 1rem; color: #222; }
-    h1 { font-size: 1.3rem; }
-    .back { font-size: 0.9rem; margin-bottom: 1rem; display: inline-block; }
-    a { color: #0969da; text-decoration: none; }
-    a:hover { text-decoration: underline; }
-    label { display: block; margin-bottom: 0.3rem; font-size: 0.9rem; }
-    input[type=text] {
-      width: 100%; padding: 0.5rem 0.6rem; border: 1px solid #d0d7de;
-      border-radius: 6px; font-size: 1rem; box-sizing: border-box;
-    }
-    .hint { font-size: 0.8rem; color: #666; margin-top: 0.3rem; }
-    .error { color: #cf222e; font-size: 0.9rem; margin-bottom: 1rem; }
-    button {
-      margin-top: 1rem; background: #0969da; color: #fff; border: none;
-      padding: 0.5rem 1rem; border-radius: 6px; font-size: 0.95rem; cursor: pointer;
-    }
-    button:hover { background: #0550ae; }
-  </style>
-</head>
-<body>
-  <a class="back" href="/">← all repositories</a>
-  <h1>New repository</h1>
-
-  {{if .Error}}
-  <p class="error">{{.Error}}</p>
-  {{end}}
-
-  <form method="post" action="/new">
-    <label for="name">Repository name</label>
-    <input type="text" id="name" name="name" required autofocus
-           pattern="[a-zA-Z0-9._-]+" placeholder="myproject">
-    <p class="hint">Letters, numbers, dots, underscores, hyphens. A bare repo will be created.</p>
-    <button type="submit">Create</button>
-  </form>
-</body>
-</html>`
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>New repository · forgejo-simple</title>
+<style>
+:root{font-family:system-ui,-apple-system,sans-serif}
+body{max-width:28rem;margin:2rem auto;padding:0 1rem;color:#222}
+h1{font-size:1.3rem}.back{font-size:.9rem;margin-bottom:1rem;display:inline-block}
+a{color:#0969da;text-decoration:none}a:hover{text-decoration:underline}
+label{display:block;margin-bottom:.3rem;font-size:.9rem}
+input[type=text]{width:100%;padding:.5rem .6rem;border:1px solid #d0d7de;border-radius:6px;font-size:1rem;box-sizing:border-box}
+.hint{font-size:.8rem;color:#666;margin-top:.3rem}.error{color:#cf222e;font-size:.9rem;margin-bottom:1rem}
+button{margin-top:1rem;background:#0969da;color:#fff;border:none;padding:.5rem 1rem;border-radius:6px;font-size:.95rem;cursor:pointer}
+button:hover{background:#0550ae}
+</style></head><body>
+<a class="back" href="/">← all repositories</a>
+<h1>New repository</h1>
+{{if .Error}}<p class="error">{{.Error}}</p>{{end}}
+<form method="post" action="/new">
+<label for="name">Repository name</label>
+<input type="text" id="name" name="name" required autofocus pattern="[a-zA-Z0-9._-]+" placeholder="myproject">
+<p class="hint">Letters, numbers, dots, underscores, hyphens. A bare repo will be created.</p>
+<button type="submit">Create</button>
+</form></body></html>`
 
 const repoTmpl = `<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{{.Name}} · forgejo-simple</title>
-  <style>
-    :root { font-family: system-ui, -apple-system, sans-serif; }
-    body { max-width: 42rem; margin: 2rem auto; padding: 0 1rem; color: #222; }
-    h1 { font-size: 1.4rem; margin-bottom: 0.25rem; }
-    h2 { font-size: 1.1rem; margin-top: 2rem; margin-bottom: 0.5rem; }
-    .meta { color: #666; font-size: 0.9rem; margin-bottom: 1.5rem; }
-    a { color: #0969da; text-decoration: none; }
-    a:hover { text-decoration: underline; }
-    code { background: #f6f8fa; padding: 0.15em 0.4em; border-radius: 4px; font-size: 0.9em; }
-    .box { background: #f6f8fa; border: 1px solid #d0d7de; border-radius: 6px; padding: 0.8rem 1rem; margin: 1rem 0; }
-    .back { font-size: 0.9rem; margin-bottom: 1rem; display: inline-block; }
-    table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
-    td { padding: 0.4rem 0.5rem 0.4rem 0; border-bottom: 1px solid #eee; vertical-align: top; }
-    td.hash { width: 5.5rem; font-family: ui-monospace, monospace; color: #666; }
-    td.date { width: 6.5rem; color: #666; white-space: nowrap; }
-    td.mode { width: 4.5rem; font-family: ui-monospace, monospace; color: #666; }
-    .empty { color: #666; }
-    .dir { font-weight: 500; }
-    .readme {
-      background: #f6f8fa; border: 1px solid #d0d7de; border-radius: 6px;
-      padding: 1rem 1.2rem; margin-top: 1.5rem; white-space: pre-wrap;
-      font-size: 0.9rem; line-height: 1.5;
-    }
-    .readme-title { font-size: 0.85rem; color: #666; margin-bottom: 0.5rem; }
-  </style>
-</head>
-<body>
-  <a class="back" href="/">← all repositories</a>
-  <h1>{{.Name}}</h1>
-
-  <div class="box">
-    <strong>Clone</strong><br>
-    <code>git clone http://localhost:3000{{.CloneURL}}</code>
-  </div>
-
-  {{if .ReadmeContent}}
-  <div class="readme-title">{{.ReadmeName}}</div>
-  <div class="readme">{{.ReadmeContent}}</div>
-  {{end}}
-
-  <h2>Files</h2>
-  {{if .Tree}}
-  <table>
-    {{range .Tree}}
-    <tr>
-      <td class="mode">{{if eq .Type "tree"}}dir{{else}}file{{end}}</td>
-      <td class="{{if eq .Type "tree"}}dir{{end}}">
-        {{if eq .Type "blob"}}
-          <a href="/repo/{{$.Name}}/blob/{{.Name}}">{{.Name}}</a>
-        {{else}}
-          <a href="/repo/{{$.Name}}/tree/{{.Name}}">{{.Name}}</a>
-        {{end}}
-      </td>
-    </tr>
-    {{end}}
-  </table>
-  {{else}}
-  <p class="empty">No files at HEAD (empty repository?).</p>
-  {{end}}
-
-  <h2>Recent commits</h2>
-  {{if .Commits}}
-  <table>
-    {{range .Commits}}
-    <tr>
-      <td class="hash">{{.Hash}}</td>
-      <td>{{.Subject}}</td>
-      <td class="date">{{.Date}}</td>
-    </tr>
-    {{end}}
-  </table>
-  {{else}}
-  <p class="empty">No commits yet.</p>
-  {{end}}
-
-  <p class="meta" style="margin-top:2rem">Path on disk: <code>{{.RepoPath}}</code></p>
-</body>
-</html>`
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{.Name}} · forgejo-simple</title>
+<style>
+:root{font-family:system-ui,-apple-system,sans-serif}
+body{max-width:42rem;margin:2rem auto;padding:0 1rem;color:#222}
+h1{font-size:1.4rem;margin-bottom:.25rem}h2{font-size:1.1rem;margin-top:2rem;margin-bottom:.5rem}
+.meta{color:#666;font-size:.9rem;margin-bottom:1.5rem}
+a{color:#0969da;text-decoration:none}a:hover{text-decoration:underline}
+code{background:#f6f8fa;padding:.15em .4em;border-radius:4px;font-size:.9em}
+.box{background:#f6f8fa;border:1px solid #d0d7de;border-radius:6px;padding:.8rem 1rem;margin:1rem 0}
+.back{font-size:.9rem;margin-bottom:1rem;display:inline-block}
+table{width:100%;border-collapse:collapse;font-size:.9rem}
+td{padding:.4rem .5rem .4rem 0;border-bottom:1px solid #eee;vertical-align:top}
+td.hash{width:5.5rem;font-family:ui-monospace,monospace;color:#666}
+td.date{width:6.5rem;color:#666;white-space:nowrap}
+td.mode{width:4.5rem;font-family:ui-monospace,monospace;color:#666}
+.empty{color:#666}.dir{font-weight:500}
+.readme{background:#f6f8fa;border:1px solid #d0d7de;border-radius:6px;padding:1rem 1.2rem;margin-top:1.5rem;white-space:pre-wrap;font-size:.9rem;line-height:1.5}
+.readme-title{font-size:.85rem;color:#666;margin-bottom:.5rem}
+</style></head><body>
+<a class="back" href="/">← all repositories</a>
+<h1>{{.Name}}</h1>
+<div class="box"><strong>Clone</strong><br><code>git clone http://localhost:3000{{.CloneURL}}</code></div>
+{{if .ReadmeContent}}<div class="readme-title">{{.ReadmeName}}</div><div class="readme">{{.ReadmeContent}}</div>{{end}}
+<h2>Files</h2>
+{{if .Tree}}<table>{{range .Tree}}<tr>
+<td class="mode">{{if eq .Type "tree"}}dir{{else}}file{{end}}</td>
+<td class="{{if eq .Type "tree"}}dir{{end}}">
+{{if eq .Type "blob"}}<a href="/repo/{{$.Name}}/blob/{{.Name}}">{{.Name}}</a>
+{{else}}<a href="/repo/{{$.Name}}/tree/{{.Name}}">{{.Name}}</a>{{end}}
+</td></tr>{{end}}</table>
+{{else}}<p class="empty">No files at HEAD (empty repository?).</p>{{end}}
+<h2>Recent commits</h2>
+{{if .Commits}}<table>{{range .Commits}}<tr>
+<td class="hash">{{.Hash}}</td><td>{{.Subject}}</td><td class="date">{{.Date}}</td>
+</tr>{{end}}</table>{{else}}<p class="empty">No commits yet.</p>{{end}}
+<p class="meta" style="margin-top:2rem">Path on disk: <code>{{.RepoPath}}</code></p>
+</body></html>`
 
 const treeTmpl = `<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{{.TreePath}} · {{.RepoName}}</title>
-  <style>
-    :root { font-family: system-ui, -apple-system, sans-serif; }
-    body { max-width: 42rem; margin: 2rem auto; padding: 0 1rem; color: #222; }
-    h1 { font-size: 1.2rem; margin-bottom: 0.5rem; word-break: break-all; }
-    .back { font-size: 0.9rem; margin-bottom: 1rem; display: inline-block; }
-    a { color: #0969da; text-decoration: none; }
-    a:hover { text-decoration: underline; }
-    table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
-    td { padding: 0.4rem 0.5rem 0.4rem 0; border-bottom: 1px solid #eee; }
-    td.mode { width: 4.5rem; font-family: ui-monospace, monospace; color: #666; }
-    .dir { font-weight: 500; }
-    .empty { color: #666; }
-  </style>
-</head>
-<body>
-  {{if .TreePath}}
-    {{if .Parent}}
-      <a class="back" href="/repo/{{.RepoName}}/tree/{{.Parent}}">← {{.Parent}}</a>
-    {{else}}
-      <a class="back" href="/repo/{{.RepoName}}">← {{.RepoName}}</a>
-    {{end}}
-  {{else}}
-    <a class="back" href="/repo/{{.RepoName}}">← {{.RepoName}}</a>
-  {{end}}
-
-  <h1>{{if .TreePath}}{{.TreePath}}{{else}}/{{end}}</h1>
-
-  {{if .Tree}}
-  <table>
-    {{range .Tree}}
-    <tr>
-      <td class="mode">{{if eq .Type "tree"}}dir{{else}}file{{end}}</td>
-      <td class="{{if eq .Type "tree"}}dir{{end}}">
-        {{if eq .Type "blob"}}
-          <a href="/repo/{{$.RepoName}}/blob/{{if $.TreePath}}{{$.TreePath}}/{{end}}{{.Name}}">{{.Name}}</a>
-        {{else}}
-          <a href="/repo/{{$.RepoName}}/tree/{{if $.TreePath}}{{$.TreePath}}/{{end}}{{.Name}}">{{.Name}}</a>
-        {{end}}
-      </td>
-    </tr>
-    {{end}}
-  </table>
-  {{else}}
-  <p class="empty">Empty directory.</p>
-  {{end}}
-</body>
-</html>`
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{.TreePath}} · {{.RepoName}}</title>
+<style>
+:root{font-family:system-ui,-apple-system,sans-serif}
+body{max-width:42rem;margin:2rem auto;padding:0 1rem;color:#222}
+h1{font-size:1.2rem;margin-bottom:.5rem;word-break:break-all}
+.crumbs{font-size:.9rem;margin-bottom:1rem;color:#666}
+.crumbs a{color:#0969da;text-decoration:none}.crumbs a:hover{text-decoration:underline}
+.crumbs span{margin:0 .25rem}
+table{width:100%;border-collapse:collapse;font-size:.9rem}
+td{padding:.4rem .5rem .4rem 0;border-bottom:1px solid #eee}
+td.mode{width:4.5rem;font-family:ui-monospace,monospace;color:#666}
+.dir{font-weight:500}.empty{color:#666}
+a{color:#0969da;text-decoration:none}a:hover{text-decoration:underline}
+</style></head><body>
+<nav class="crumbs">
+{{range $i, $c := .Crumbs}}
+  {{if $i}}<span>/</span>{{end}}
+  {{if $c.Href}}<a href="{{$c.Href}}">{{$c.Name}}</a>{{else}}<strong>{{$c.Name}}</strong>{{end}}
+{{end}}
+</nav>
+<h1>{{if .TreePath}}{{.TreePath}}{{else}}/{{end}}</h1>
+{{if .Tree}}<table>{{range .Tree}}<tr>
+<td class="mode">{{if eq .Type "tree"}}dir{{else}}file{{end}}</td>
+<td class="{{if eq .Type "tree"}}dir{{end}}">
+{{if eq .Type "blob"}}<a href="/repo/{{$.RepoName}}/blob/{{if $.TreePath}}{{$.TreePath}}/{{end}}{{.Name}}">{{.Name}}</a>
+{{else}}<a href="/repo/{{$.RepoName}}/tree/{{if $.TreePath}}{{$.TreePath}}/{{end}}{{.Name}}">{{.Name}}</a>{{end}}
+</td></tr>{{end}}</table>
+{{else}}<p class="empty">Empty directory.</p>{{end}}
+</body></html>`
 
 const blobTmpl = `<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{{.FilePath}} · {{.RepoName}}</title>
-  <style>
-    :root { font-family: system-ui, -apple-system, sans-serif; }
-    body { max-width: 50rem; margin: 2rem auto; padding: 0 1rem; color: #222; }
-    h1 { font-size: 1.2rem; margin-bottom: 0.5rem; word-break: break-all; }
-    .back { font-size: 0.9rem; margin-bottom: 1rem; display: inline-block; }
-    a { color: #0969da; text-decoration: none; }
-    a:hover { text-decoration: underline; }
-    pre {
-      background: #f6f8fa; border: 1px solid #d0d7de; border-radius: 6px;
-      padding: 1rem; overflow: auto; font-size: 0.85rem; line-height: 1.45;
-    }
-  </style>
-</head>
-<body>
-  {{if .Parent}}
-    <a class="back" href="/repo/{{.RepoName}}/tree/{{.Parent}}">← {{.Parent}}</a>
-  {{else}}
-    <a class="back" href="/repo/{{.RepoName}}">← {{.RepoName}}</a>
-  {{end}}
-  <h1>{{.FilePath}}</h1>
-  <pre>{{.Content}}</pre>
-</body>
-</html>`
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{.FilePath}} · {{.RepoName}}</title>
+<style>
+:root{font-family:system-ui,-apple-system,sans-serif}
+body{max-width:50rem;margin:2rem auto;padding:0 1rem;color:#222}
+h1{font-size:1.2rem;margin-bottom:.5rem;word-break:break-all}
+.crumbs{font-size:.9rem;margin-bottom:1rem;color:#666}
+.crumbs a{color:#0969da;text-decoration:none}.crumbs a:hover{text-decoration:underline}
+.crumbs span{margin:0 .25rem}
+pre{background:#f6f8fa;border:1px solid #d0d7de;border-radius:6px;padding:1rem;overflow:auto;font-size:.85rem;line-height:1.45}
+</style></head><body>
+<nav class="crumbs">
+{{range $i, $c := .Crumbs}}
+  {{if $i}}<span>/</span>{{end}}
+  {{if $c.Href}}<a href="{{$c.Href}}">{{$c.Name}}</a>{{else}}<strong>{{$c.Name}}</strong>{{end}}
+{{end}}
+</nav>
+<h1>{{.FilePath}}</h1>
+<pre>{{.Content}}</pre>
+</body></html>`

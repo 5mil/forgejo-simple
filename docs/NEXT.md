@@ -8,12 +8,13 @@
 - File tree + directory navigation
 - Blob / file view
 - README rendering
-- **Create repository form** (`/new`)
+- Create repository form
+- **Breadcrumb navigation** on tree and blob pages
 
 ## Possible next chunks
-1. Breadcrumb path on tree/blob pages
-2. Very light Markdown rendering for README
-3. Delete repository (with confirmation)
-4. Simple optional authentication
+1. Light Markdown rendering for README
+2. Delete repository (with confirmation)
+3. Simple optional authentication
+4. Show author on the commit list
 
-You can now create, clone, push, and fully browse repositories from the web UI.
+Core UX for browsing is now polished with proper path breadcrumbs.
