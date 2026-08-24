@@ -6,14 +6,15 @@
 - [x] Chunk C – Make design actionable
 - [x] Chunk D – Clean repository structure
 - [x] Chunk E – Precise before/after for template + handler
-- [x] Chunk F – Check build environment (result: still unavailable)
+- [x] Chunk F – Environment check (initially unavailable)
+- [x] Chunk F2 – Environment recovered
+- [x] Chunk G1 – Clone Forgejo v16.0.3 + create branch `forgejo-simple-minimal`
+- [x] Chunk G2 – First real code change: force SQLite3 as the only DB type in install wizard
 
-## Next
-- [ ] Chunk F2 – Re-check environment (keep trying on each "Next")
-- [ ] Chunk G – Real source work (clone → patch → build → test) — blocked until environment recovers
+## In progress
+- [ ] Chunk G3 – Simplify the install template (hide most fields)
+- [ ] Chunk G4 – Build and test the binary
 - [ ] Chunk H – Push real modified source into this repository
-- [ ] Chunk I – Further simplification (MINIMAL flag, zero-config)
 
-## Note
-The automated build sandbox continues to report no capacity.  
-We will keep checking on every "Next" until it becomes available.
+## Later
+- [ ] Chunk I – Further simplification (MINIMAL flag, zero-config)

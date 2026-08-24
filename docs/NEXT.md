@@ -1,9 +1,11 @@
 # Current Next Action
 
-**Chunk F2** – Re-check whether the build environment has capacity.
+**Chunk G3** – Simplify the install template so only Title + Admin fields are visible.
 
-The previous check (Chunk F) failed with a capacity error.
+### Already done in this session
+- Environment capacity restored
+- Cloned Forgejo v16.0.3
+- Created branch `forgejo-simple-minimal`
+- Applied first real code change: `getSupportedDbTypeNames()` now only returns SQLite3
 
-Every time you say **Next**, the first thing that will happen is another environment check.
-
-As soon as the environment is available we will immediately move to Chunk G (real source work).
+Next small step: edit `templates/install.tmpl` to hide the database selection UI and most other fields.
