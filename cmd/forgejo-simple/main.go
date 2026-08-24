@@ -26,7 +26,6 @@ func main() {
 		log.Fatalf("cannot create data directory: %v", err)
 	}
 
-	// Make sure git is available
 	if _, err := exec.LookPath("git"); err != nil {
 		log.Fatal("git binary not found in PATH – required for smart HTTP")
 	}
@@ -47,8 +46,25 @@ func main() {
 		renderHome(w, absoluteData, repos)
 	})
 
-	// Git smart HTTP – any path under /git/ is handled by git http-backend
-	// Example clone URL: http://localhost:3000/git/myproject.git
+	// Repository view page: /repo/<name>
+	mux.HandleFunc("/repo/", func(w http.ResponseWriter, r *http.Request) {
+		name := strings.TrimPrefix(r.URL.Path, "/repo/")
+		name = filepath.Clean(name)
+		if name == "." || name == "" || strings.Contains(name, "/") || strings.Contains(name, "..") {
+			http.NotFound(w, r)
+			return
+		}
+
+		repoPath := filepath.Join(absoluteData, name)
+		if !isGitRepo(repoPath) {
+			http.NotFound(w, r)
+			return
+		}
+
+		renderRepo(w, name, repoPath)
+	})
+
+	// Git smart HTTP – /git/<name>.git/...
 	mux.Handle("/git/", gitSmartHTTP(absoluteData))
 
 	log.Printf("forgejo-simple listening on %s", *addr)
@@ -59,10 +75,8 @@ func main() {
 	}
 }
 
-// gitSmartHTTP returns a handler that uses git http-backend (CGI).
 func gitSmartHTTP(projectRoot string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Translate /git/myrepo.git/... → PATH_INFO=/myrepo.git/...
 		pathInfo := strings.TrimPrefix(r.URL.Path, "/git")
 		if pathInfo == "" {
 			pathInfo = "/"
@@ -82,26 +96,26 @@ func gitSmartHTTP(projectRoot string) http.Handler {
 	})
 }
 
-// listRepos returns the names of directories under dataDir that look like Git repositories.
 func listRepos(dataDir string) ([]string, error) {
 	entries, err := os.ReadDir(dataDir)
 	if err != nil {
 		return nil, err
 	}
-
 	var repos []string
 	for _, e := range entries {
 		if !e.IsDir() {
 			continue
 		}
 		name := e.Name()
-		gitDir := filepath.Join(dataDir, name, ".git")
-		bareGit := filepath.Join(dataDir, name, "HEAD")
-		if fileExists(gitDir) || fileExists(bareGit) {
+		if isGitRepo(filepath.Join(dataDir, name)) {
 			repos = append(repos, name)
 		}
 	}
 	return repos, nil
+}
+
+func isGitRepo(path string) bool {
+	return fileExists(filepath.Join(path, "HEAD")) || fileExists(filepath.Join(path, ".git"))
 }
 
 func fileExists(path string) bool {
@@ -111,8 +125,47 @@ func fileExists(path string) bool {
 
 func renderHome(w http.ResponseWriter, dataDir string, repos []string) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	tmpl := template.Must(template.New("home").Parse(homeTmpl))
+	data := struct {
+		DataDir string
+		Repos  []string
+	}{dataDir, repos}
+	if err := tmpl.Execute(w, data); err != nil {
+		log.Printf("template error: %v", err)
+	}
+}
 
-	tmpl := template.Must(template.New("home").Parse(`<!DOCTYPE html>
+func renderRepo(w http.ResponseWriter, name, repoPath string) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+
+	// Try to get a short description from the most recent commit subject
+	desc := ""
+	cmd := exec.Command("git", "log", "-1", "--pretty=%s")
+	cmd.Dir = repoPath
+	if out, err := cmd.Output(); err == nil {
+		desc = strings.TrimSpace(string(out))
+	}
+
+	cloneURL := fmt.Sprintf("/git/%s", name)
+
+	tmpl := template.Must(template.New("repo").Parse(repoTmpl))
+	data := struct {
+		Name        string
+		Description string
+		CloneURL    string
+		RepoPath    string
+	}{
+		Name:        name,
+		Description: desc,
+		CloneURL:    cloneURL,
+		RepoPath:    repoPath,
+	}
+	if err := tmpl.Execute(w, data); err != nil {
+		log.Printf("template error: %v", err)
+	}
+}
+
+const homeTmpl = `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
@@ -124,25 +177,20 @@ func renderHome(w http.ResponseWriter, dataDir string, repos []string) {
     h1 { font-size: 1.4rem; margin-bottom: 0.25rem; }
     .meta { color: #666; font-size: 0.9rem; margin-bottom: 1.5rem; }
     ul { list-style: none; padding: 0; }
-    li { padding: 0.6rem 0; border-bottom: 1px solid #eee; display: flex; justify-content: space-between; align-items: center; }
+    li { padding: 0.6rem 0; border-bottom: 1px solid #eee; }
     a { color: #0969da; text-decoration: none; }
     a:hover { text-decoration: underline; }
     .empty { color: #666; }
     code { background: #f6f8fa; padding: 0.15em 0.4em; border-radius: 4px; font-size: 0.85em; }
-    .clone { font-size: 0.8rem; color: #666; }
   </style>
 </head>
 <body>
   <h1>forgejo-simple</h1>
   <p class="meta">Minimal Git forge &middot; data: <code>{{.DataDir}}</code></p>
-
   {{if .Repos}}
   <ul>
     {{range .Repos}}
-    <li>
-      <span>{{.}}</span>
-      <span class="clone"><code>git clone /git/{{.}}</code></span>
-    </li>
+    <li><a href="/repo/{{.}}">{{.}}</a></li>
     {{end}}
   </ul>
   {{else}}
@@ -151,16 +199,38 @@ func renderHome(w http.ResponseWriter, dataDir string, repos []string) {
   <code>git init --bare {{.DataDir}}/myproject.git</code></p>
   {{end}}
 </body>
-</html>`))
+</html>`
 
-	data := struct {
-		DataDir string
-		Repos  []string
-	}{
-		DataDir: dataDir,
-		Repos:  repos,
-	}
-	if err := tmpl.Execute(w, data); err != nil {
-		log.Printf("template error: %v", err)
-	}
-}
+const repoTmpl = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{.Name}} · forgejo-simple</title>
+  <style>
+    :root { font-family: system-ui, -apple-system, sans-serif; }
+    body { max-width: 42rem; margin: 2rem auto; padding: 0 1rem; color: #222; }
+    h1 { font-size: 1.4rem; margin-bottom: 0.25rem; }
+    .meta { color: #666; font-size: 0.9rem; margin-bottom: 1.5rem; }
+    a { color: #0969da; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    code { background: #f6f8fa; padding: 0.15em 0.4em; border-radius: 4px; font-size: 0.9em; }
+    .box { background: #f6f8fa; border: 1px solid #d0d7de; border-radius: 6px; padding: 0.8rem 1rem; margin: 1rem 0; }
+    .back { font-size: 0.9rem; margin-bottom: 1rem; display: inline-block; }
+  </style>
+</head>
+<body>
+  <a class="back" href="/">← all repositories</a>
+  <h1>{{.Name}}</h1>
+  {{if .Description}}
+  <p class="meta">{{.Description}}</p>
+  {{end}}
+
+  <div class="box">
+    <strong>Clone</strong><br>
+    <code>git clone http://localhost:3000{{.CloneURL}}</code>
+  </div>
+
+  <p class="meta">Path on disk: <code>{{.RepoPath}}</code></p>
+</body>
+</html>`
