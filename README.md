@@ -1,68 +1,67 @@
 # forgejo-simple
 
-**Faster. Simpler. No bloat.**
+**A truly minimal Git forge.**
 
-A focused direction for Forgejo that prioritises:
+Faster. Simpler. No bloat.
 
-- SQLite-only by default
-- Extremely short install wizard
-- Opinionated, minimal configuration
-- No unnecessary features or steps
+This project started as an attempt to simplify Forgejo.  
+We have now pivoted to building a **small forge from scratch** that only includes what is actually needed:
 
-Repository: https://github.com/5mil/forgejo-simple
+- Host Git repositories
+- Extremely simple web UI (list repos, browse files, view commits)
+- SQLite (or pure filesystem) for metadata
+- Single static binary
+- Almost zero configuration
 
----
-
-## Current Status
-
-This repository currently contains **design, patches descriptions, and helpers**.  
-Real modified Forgejo source code will be added once a build environment is available.
-
-| Area                    | Status      |
-|-------------------------|-------------|
-| Vision & goals          | Done        |
-| First change design     | Done        |
-| Repository structure    | Done        |
-| Real source patches     | Pending     |
-| Buildable binary        | Pending     |
+No packages, no Actions, no Projects, no heavy frontend, no long install wizard.
 
 ---
 
-## Repository Structure
+## Status
+
+We are at the very beginning of the from-scratch implementation.
+
+| Piece                    | Status   |
+|--------------------------|----------|
+| Project direction        | Done     |
+| Basic Go module          | Next     |
+| Git smart HTTP endpoint  | Planned |
+| Simple web UI            | Planned |
+| SQLite metadata          | Planned |
+| Single binary release    | Planned |
+
+---
+
+## Design principles
+
+1. **One binary** – `./forgejo-simple` should just work.
+2. **SQLite or filesystem first** – no external database required.
+3. **Server-rendered HTML** – minimal or zero JavaScript.
+4. **Git is the source of truth** – we do not re-implement version control.
+5. **Sensible defaults** – almost no configuration needed for local use.
+
+---
+
+## Repository layout (growing)
 
 ```
 forgejo-simple/
-├── README.md                  ← you are here
-├── LICENSE
-├── docs/
-│   ├── SIMPLIFICATION.md      ← overall plan
-│   ├── ROADMAP.md
-│   └── NEXT.md
-├── patches/
-│   └── 0001-sqlite-only-minimal-install.md
-├── examples/
-│   └── minimal-app.ini
-└── scripts/
-    └── apply-minimal-install.sh
+├── README.md
+├── go.mod                  ← coming next
+├── cmd/                   ← main entrypoint
+├── internal/
+│   ├── git/                ← smart HTTP + repo helpers
+│   ├── web/                ← simple HTML UI
+│   └── db/                 ← optional SQLite metadata
+└── data/                  ← repositories live here by default
 ```
 
 ---
 
-## The First Real Change (when we can build)
+## License
 
-**Goal:** Turn the long Forgejo install page into a 4-field form.
-
-- Force SQLite3 only
-- Keep only: Instance title + Admin username + Password + Confirm
-- Hide everything else behind good defaults
-
-See `patches/0001-sqlite-only-minimal-install.md` for the exact planned edits.
-
----
-
-## How to follow progress
-
-Just say **Next** and we will complete the next small chunk.
+MIT (for the new minimal code).  
+Any future optional Forgejo-derived patches will remain under GPL-3.0-or-later.
 
 ---
 
