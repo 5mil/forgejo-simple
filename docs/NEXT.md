@@ -1,20 +1,19 @@
 # Current Next Action
 
-**Chunk G3** – Simplify the install template (`templates/install.tmpl`).
+**Retry environment → then Chunk G3**
 
-### Status of this attempt
-Environment capacity disappeared again while starting G3.
+The build sandbox is still reporting no capacity.
 
-### Already achieved in the previous successful window
-- Cloned Forgejo v16.0.3
-- Branch `forgejo-simple-minimal` created
-- Real code change committed: SQLite3 forced as the only database type in `routers/install/install.go`
+### Already achieved
+- Real code change exists (from earlier successful window):
+  - `getSupportedDbTypeNames()` forced to SQLite3 only
+  - Committed on branch `forgejo-simple-minimal`
 
-### What G3 will do when capacity returns
-Edit `templates/install.tmpl` so that:
-- Database type selector is removed / hidden
-- Most server and path fields are hidden
-- Only Instance Title + Admin Username / Password / Confirm remain visible
-- Hidden inputs supply the SQLite defaults
+### Waiting for
+Capacity so we can:
+1. Confirm/re-clone the source if needed
+2. Edit `templates/install.tmpl` (Chunk G3)
+3. Build and test (G4)
+4. Push real source to this repository (H)
 
-Say **Next** to retry the environment and continue G3.
+Say **Next** to check again.
