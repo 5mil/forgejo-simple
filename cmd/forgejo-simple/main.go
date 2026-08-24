@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path"
 	"path/filepath"
+	"regexp"
 	"strings"
 )
 
@@ -23,10 +24,12 @@ type Commit struct {
 
 type TreeEntry struct {
 	Mode string
-	Type string // "blob" or "tree"
+	Type string
 	Hash string
 	Name string
 }
+
+var validRepoName = regexp.MustCompile(`^[a-zA-Z0-9._-]+$`)
 
 func main() {
 	addr := flag.String("addr", ":3000", "HTTP listen address")
@@ -57,7 +60,45 @@ func main() {
 			http.Error(w, "failed to list repositories", http.StatusInternalServerError)
 			return
 		}
-		renderHome(w, absoluteData, repos)
+		renderHome(w, absoluteData, repos, "")
+	})
+
+	// Create repository
+	mux.HandleFunc("/new", func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			renderNew(w, "")
+		case http.MethodPost:
+			if err := r.ParseForm(); err != nil {
+				renderNew(w, "invalid form")
+				return
+			}
+			name := strings.TrimSpace(r.FormValue("name"))
+			if name == "" {
+				renderNew(w, "name is required")
+				return
+			}
+			// Allow optional .git suffix; store without forcing it
+			name = strings.TrimSuffix(name, ".git")
+			if !validRepoName.MatchString(name) {
+				renderNew(w, "name may only contain letters, numbers, dots, underscores and hyphens")
+				return
+			}
+			repoPath := filepath.Join(absoluteData, name+".git")
+			if isGitRepo(repoPath) || isGitRepo(filepath.Join(absoluteData, name)) {
+				renderNew(w, "repository already exists")
+				return
+			}
+			cmd := exec.Command("git", "init", "--bare", repoPath)
+			if out, err := cmd.CombinedOutput(); err != nil {
+				log.Printf("git init failed: %v %s", err, out)
+				renderNew(w, "failed to create repository")
+				return
+			}
+			http.Redirect(w, r, "/repo/"+name+".git", http.StatusSeeOther)
+		default:
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		}
 	})
 
 	mux.HandleFunc("/repo/", func(w http.ResponseWriter, r *http.Request) {
@@ -236,7 +277,6 @@ func getBlob(repoPath, filePath string) (string, error) {
 	return string(out), nil
 }
 
-// tryReadme looks for common README filenames at the repository root.
 func tryReadme(repoPath string) (string, string) {
 	candidates := []string{"README.md", "Readme.md", "readme.md", "README", "README.txt"}
 	for _, name := range candidates {
@@ -248,13 +288,23 @@ func tryReadme(repoPath string) (string, string) {
 	return "", ""
 }
 
-func renderHome(w http.ResponseWriter, dataDir string, repos []string) {
+func renderHome(w http.ResponseWriter, dataDir string, repos []string, msg string) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	tmpl := template.Must(template.New("home").Parse(homeTmpl))
 	data := struct {
 		DataDir string
 		Repos  []string
-	}{dataDir, repos}
+		Msg     string
+	}{dataDir, repos, msg}
+	if err := tmpl.Execute(w, data); err != nil {
+		log.Printf("template error: %v", err)
+	}
+}
+
+func renderNew(w http.ResponseWriter, errMsg string) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	tmpl := template.Must(template.New("new").Parse(newTmpl))
+	data := struct{ Error string }{errMsg}
 	if err := tmpl.Execute(w, data); err != nil {
 		log.Printf("template error: %v", err)
 	}
@@ -360,11 +410,19 @@ const homeTmpl = `<!DOCTYPE html>
     a:hover { text-decoration: underline; }
     .empty { color: #666; }
     code { background: #f6f8fa; padding: 0.15em 0.4em; border-radius: 4px; font-size: 0.85em; }
+    .actions { margin-bottom: 1.5rem; }
+    .btn { display: inline-block; background: #0969da; color: #fff; padding: 0.4rem 0.8rem; border-radius: 6px; font-size: 0.9rem; text-decoration: none; }
+    .btn:hover { background: #0550ae; color: #fff; text-decoration: none; }
   </style>
 </head>
 <body>
   <h1>forgejo-simple</h1>
   <p class="meta">Minimal Git forge &middot; data: <code>{{.DataDir}}</code></p>
+
+  <div class="actions">
+    <a class="btn" href="/new">New repository</a>
+  </div>
+
   {{if .Repos}}
   <ul>
     {{range .Repos}}
@@ -373,9 +431,54 @@ const homeTmpl = `<!DOCTYPE html>
   </ul>
   {{else}}
   <p class="empty">No repositories found.</p>
-  <p class="empty">Create a bare repo with:<br>
+  <p class="empty">Create one with the button above, or:<br>
   <code>git init --bare {{.DataDir}}/myproject.git</code></p>
   {{end}}
+</body>
+</html>`
+
+const newTmpl = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>New repository · forgejo-simple</title>
+  <style>
+    :root { font-family: system-ui, -apple-system, sans-serif; }
+    body { max-width: 28rem; margin: 2rem auto; padding: 0 1rem; color: #222; }
+    h1 { font-size: 1.3rem; }
+    .back { font-size: 0.9rem; margin-bottom: 1rem; display: inline-block; }
+    a { color: #0969da; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    label { display: block; margin-bottom: 0.3rem; font-size: 0.9rem; }
+    input[type=text] {
+      width: 100%; padding: 0.5rem 0.6rem; border: 1px solid #d0d7de;
+      border-radius: 6px; font-size: 1rem; box-sizing: border-box;
+    }
+    .hint { font-size: 0.8rem; color: #666; margin-top: 0.3rem; }
+    .error { color: #cf222e; font-size: 0.9rem; margin-bottom: 1rem; }
+    button {
+      margin-top: 1rem; background: #0969da; color: #fff; border: none;
+      padding: 0.5rem 1rem; border-radius: 6px; font-size: 0.95rem; cursor: pointer;
+    }
+    button:hover { background: #0550ae; }
+  </style>
+</head>
+<body>
+  <a class="back" href="/">← all repositories</a>
+  <h1>New repository</h1>
+
+  {{if .Error}}
+  <p class="error">{{.Error}}</p>
+  {{end}}
+
+  <form method="post" action="/new">
+    <label for="name">Repository name</label>
+    <input type="text" id="name" name="name" required autofocus
+           pattern="[a-zA-Z0-9._-]+" placeholder="myproject">
+    <p class="hint">Letters, numbers, dots, underscores, hyphens. A bare repo will be created.</p>
+    <button type="submit">Create</button>
+  </form>
 </body>
 </html>`
 
@@ -404,14 +507,9 @@ const repoTmpl = `<!DOCTYPE html>
     .empty { color: #666; }
     .dir { font-weight: 500; }
     .readme {
-      background: #f6f8fa;
-      border: 1px solid #d0d7de;
-      border-radius: 6px;
-      padding: 1rem 1.2rem;
-      margin-top: 1.5rem;
-      white-space: pre-wrap;
-      font-size: 0.9rem;
-      line-height: 1.5;
+      background: #f6f8fa; border: 1px solid #d0d7de; border-radius: 6px;
+      padding: 1rem 1.2rem; margin-top: 1.5rem; white-space: pre-wrap;
+      font-size: 0.9rem; line-height: 1.5;
     }
     .readme-title { font-size: 0.85rem; color: #666; margin-bottom: 0.5rem; }
   </style>
@@ -537,13 +635,8 @@ const blobTmpl = `<!DOCTYPE html>
     a { color: #0969da; text-decoration: none; }
     a:hover { text-decoration: underline; }
     pre {
-      background: #f6f8fa;
-      border: 1px solid #d0d7de;
-      border-radius: 6px;
-      padding: 1rem;
-      overflow: auto;
-      font-size: 0.85rem;
-      line-height: 1.45;
+      background: #f6f8fa; border: 1px solid #d0d7de; border-radius: 6px;
+      padding: 1rem; overflow: auto; font-size: 0.85rem; line-height: 1.45;
     }
   </style>
 </head>

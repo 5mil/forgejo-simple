@@ -3,17 +3,17 @@
 ## Done
 - Basic HTTP server
 - Repository list
-- Git smart HTTP
-- Repository view page
-- Recent commits
+- Git smart HTTP (clone / push)
+- Repository view + recent commits
 - File tree + directory navigation
 - Blob / file view
-- **README rendering** (shows README.md / README / etc. on the repo page)
+- README rendering
+- **Create repository form** (`/new`)
 
 ## Possible next chunks
-1. Create-repository form (so you don't need the command line)
-2. Breadcrumb path on tree/blob pages
-3. Very light Markdown rendering for the README (optional)
-4. Simple auth later if needed
+1. Breadcrumb path on tree/blob pages
+2. Very light Markdown rendering for README
+3. Delete repository (with confirmation)
+4. Simple optional authentication
 
-Core browse + clone + README workflow is complete.
+You can now create, clone, push, and fully browse repositories from the web UI.
