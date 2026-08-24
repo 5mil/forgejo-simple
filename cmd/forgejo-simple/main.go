@@ -3,7 +3,6 @@ package main
 import (
 	"flag"
 	"fmt"
-	"html"
 	"html/template"
 	"log"
 	"net/http"
@@ -61,9 +60,10 @@ func main() {
 		renderHome(w, absoluteData, repos)
 	})
 
-	// /repo/<name>          → repo overview
-	// /repo/<name>/tree/... → directory (future)
-	// /repo/<name>/blob/... → file content
+	// Routes under /repo/
+	//   /repo/<name>              → repo overview (root tree + commits)
+	//   /repo/<name>/tree/<path>  → directory listing
+	//   /repo/<name>/blob/<path>  → file content
 	mux.HandleFunc("/repo/", func(w http.ResponseWriter, r *http.Request) {
 		rest := strings.TrimPrefix(r.URL.Path, "/repo/")
 		parts := strings.SplitN(rest, "/", 3)
@@ -91,23 +91,26 @@ func main() {
 			return
 		}
 
-		// /repo/<name>/blob/<path>
-		if len(parts) >= 2 && parts[1] == "blob" {
-			filePath := ""
-			if len(parts) == 3 {
-				filePath = parts[2]
-			}
-			filePath = path.Clean("/" + filePath)
-			filePath = strings.TrimPrefix(filePath, "/")
-			if strings.Contains(filePath, "..") {
-				http.NotFound(w, r)
-				return
-			}
-			renderBlob(w, name, repoPath, filePath)
+		sub := parts[1]
+		filePath := ""
+		if len(parts) == 3 {
+			filePath = parts[2]
+		}
+		filePath = path.Clean("/" + filePath)
+		filePath = strings.TrimPrefix(filePath, "/")
+		if strings.Contains(filePath, "..") {
+			http.NotFound(w, r)
 			return
 		}
 
-		http.NotFound(w, r)
+		switch sub {
+		case "blob":
+			renderBlob(w, name, repoPath, filePath)
+		case "tree":
+			renderTree(w, name, repoPath, filePath)
+		default:
+			http.NotFound(w, r)
+		}
 	})
 
 	mux.Handle("/git/", gitSmartHTTP(absoluteData))
@@ -193,8 +196,12 @@ func recentCommits(repoPath string, n int) []Commit {
 	return commits
 }
 
-func listTree(repoPath string) []TreeEntry {
-	cmd := exec.Command("git", "ls-tree", "HEAD")
+func listTree(repoPath, treePath string) []TreeEntry {
+	args := []string{"ls-tree", "HEAD"}
+	if treePath != "" {
+		args = append(args, treePath+"/")
+	}
+	cmd := exec.Command("git", args...)
 	cmd.Dir = repoPath
 	out, err := cmd.Output()
 	if err != nil {
@@ -213,11 +220,13 @@ func listTree(repoPath string) []TreeEntry {
 		if len(meta) < 3 {
 			continue
 		}
+		// parts[1] is the full path; we only want the final component for display
+		name := path.Base(parts[1])
 		entries = append(entries, TreeEntry{
 			Mode: meta[0],
 			Type: meta[1],
 			Hash: meta[2],
-			Name: parts[1],
+			Name: name,
 		})
 	}
 	return entries
@@ -249,7 +258,7 @@ func renderRepo(w http.ResponseWriter, name, repoPath string) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 
 	commits := recentCommits(repoPath, 10)
-	tree := listTree(repoPath)
+	tree := listTree(repoPath, "")
 	cloneURL := fmt.Sprintf("/git/%s", name)
 
 	tmpl := template.Must(template.New("repo").Parse(repoTmpl))
@@ -259,12 +268,38 @@ func renderRepo(w http.ResponseWriter, name, repoPath string) {
 		RepoPath string
 		Commits  []Commit
 		Tree     []TreeEntry
+		TreePath string
 	}{
 		Name:     name,
 		CloneURL: cloneURL,
 		RepoPath: repoPath,
 		Commits:  commits,
 		Tree:     tree,
+		TreePath: "",
+	}
+	if err := tmpl.Execute(w, data); err != nil {
+		log.Printf("template error: %v", err)
+	}
+}
+
+func renderTree(w http.ResponseWriter, repoName, repoPath, treePath string) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	tree := listTree(repoPath, treePath)
+
+	tmpl := template.Must(template.New("tree").Parse(treeTmpl))
+	data := struct {
+		RepoName string
+		TreePath string
+		Tree     []TreeEntry
+		Parent   string
+	}{
+		RepoName: repoName,
+		TreePath: treePath,
+		Tree:     tree,
+		Parent:   path.Dir(treePath),
+	}
+	if data.Parent == "." {
+		data.Parent = ""
 	}
 	if err := tmpl.Execute(w, data); err != nil {
 		log.Printf("template error: %v", err)
@@ -274,7 +309,7 @@ func renderRepo(w http.ResponseWriter, name, repoPath string) {
 func renderBlob(w http.ResponseWriter, repoName, repoPath, filePath string) {
 	content, err := getBlob(repoPath, filePath)
 	if err != nil {
-		http.NotFound(w, nil)
+		http.Error(w, "file not found", http.StatusNotFound)
 		return
 	}
 
@@ -284,10 +319,15 @@ func renderBlob(w http.ResponseWriter, repoName, repoPath, filePath string) {
 		RepoName string
 		FilePath string
 		Content  string
+		Parent   string
 	}{
 		RepoName: repoName,
 		FilePath: filePath,
 		Content:  content,
+		Parent:   path.Dir(filePath),
+	}
+	if data.Parent == "." {
+		data.Parent = ""
 	}
 	if err := tmpl.Execute(w, data); err != nil {
 		log.Printf("template error: %v", err)
@@ -375,7 +415,7 @@ const repoTmpl = `<!DOCTYPE html>
         {{if eq .Type "blob"}}
           <a href="/repo/{{$.Name}}/blob/{{.Name}}">{{.Name}}</a>
         {{else}}
-          {{.Name}}
+          <a href="/repo/{{$.Name}}/tree/{{.Name}}">{{.Name}}</a>
         {{end}}
       </td>
     </tr>
@@ -404,6 +444,60 @@ const repoTmpl = `<!DOCTYPE html>
 </body>
 </html>`
 
+const treeTmpl = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{.TreePath}} · {{.RepoName}}</title>
+  <style>
+    :root { font-family: system-ui, -apple-system, sans-serif; }
+    body { max-width: 42rem; margin: 2rem auto; padding: 0 1rem; color: #222; }
+    h1 { font-size: 1.2rem; margin-bottom: 0.5rem; word-break: break-all; }
+    .back { font-size: 0.9rem; margin-bottom: 1rem; display: inline-block; }
+    a { color: #0969da; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+    td { padding: 0.4rem 0.5rem 0.4rem 0; border-bottom: 1px solid #eee; }
+    td.mode { width: 4.5rem; font-family: ui-monospace, monospace; color: #666; }
+    .dir { font-weight: 500; }
+    .empty { color: #666; }
+  </style>
+</head>
+<body>
+  {{if .TreePath}}
+    {{if .Parent}}
+      <a class="back" href="/repo/{{.RepoName}}/tree/{{.Parent}}">← {{.Parent}}</a>
+    {{else}}
+      <a class="back" href="/repo/{{.RepoName}}">← {{.RepoName}}</a>
+    {{end}}
+  {{else}}
+    <a class="back" href="/repo/{{.RepoName}}">← {{.RepoName}}</a>
+  {{end}}
+
+  <h1>{{if .TreePath}}{{.TreePath}}{{else}}/{{end}}</h1>
+
+  {{if .Tree}}
+  <table>
+    {{range .Tree}}
+    <tr>
+      <td class="mode">{{if eq .Type "tree"}}dir{{else}}file{{end}}</td>
+      <td class="{{if eq .Type "tree"}}dir{{end}}">
+        {{if eq .Type "blob"}}
+          <a href="/repo/{{$.RepoName}}/blob/{{if $.TreePath}}{{$.TreePath}}/{{end}}{{.Name}}">{{.Name}}</a>
+        {{else}}
+          <a href="/repo/{{$.RepoName}}/tree/{{if $.TreePath}}{{$.TreePath}}/{{end}}{{.Name}}">{{.Name}}</a>
+        {{end}}
+      </td>
+    </tr>
+    {{end}}
+  </table>
+  {{else}}
+  <p class="empty">Empty directory.</p>
+  {{end}}
+</body>
+</html>`
+
 const blobTmpl = `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -429,7 +523,11 @@ const blobTmpl = `<!DOCTYPE html>
   </style>
 </head>
 <body>
-  <a class="back" href="/repo/{{.RepoName}}">← {{.RepoName}}</a>
+  {{if .Parent}}
+    <a class="back" href="/repo/{{.RepoName}}/tree/{{.Parent}}">← {{.Parent}}</a>
+  {{else}}
+    <a class="back" href="/repo/{{.RepoName}}">← {{.RepoName}}</a>
+  {{end}}
   <h1>{{.FilePath}}</h1>
   <pre>{{.Content}}</pre>
 </body>

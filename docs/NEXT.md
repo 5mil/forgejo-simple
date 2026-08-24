@@ -7,12 +7,13 @@
 - Repository view page
 - Recent commits
 - File tree at HEAD
-- **Blob / file view** (click a file to see its content)
+- Blob / file view
+- **Directory navigation** (click folders to browse into them)
 
 ## Possible next chunks
-1. Directory navigation (click a folder to browse into it)
-2. Render README.md on the repo page when present
-3. Create-repository form
-4. Very light syntax highlighting (optional)
+1. Render README.md on the repo page when present
+2. Create-repository form
+3. Breadcrumb path on tree/blob pages
+4. Light syntax highlighting (optional)
 
-Core browse + clone workflow is now complete.
+You can now fully navigate the repository tree and open any file.
