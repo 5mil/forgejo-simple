@@ -1,20 +1,9 @@
-# Current Status (Option 2 active)
+# Next small steps
 
-Because the live build environment has been unavailable for a long time, we switched to writing complete ready-to-apply files.
+1. **Done** – Pivot README + direction to from-scratch minimal forge
+2. **Done** – Basic Go module + minimal HTTP server that starts and shows a placeholder page
+3. **Next** – Add a simple repository list (scan the data directory for Git repos)
+4. After that – Git smart HTTP endpoint so `git clone http://...` works
+5. Then – basic file browser
 
-## Files now in the repository
-
-- `patches/install.tmpl.simplified`  
-  Full minimal install page (only Title + Admin fields + hidden SQLite defaults)
-
-- `patches/install.go.sqlite-only-snippet.md`  
-  Exact Go changes needed in the install handler
-
-## Next actions when environment returns
-1. Clone Forgejo v16.0.3
-2. Replace `templates/install.tmpl` with the simplified version
-3. Apply the Go snippet
-4. Build and test
-5. Push the real source
-
-Say **Next** to check the environment again, or continue refining the patches.
+The project is now a real (tiny) Go program instead of only documentation.
