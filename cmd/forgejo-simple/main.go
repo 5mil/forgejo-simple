@@ -60,10 +60,6 @@ func main() {
 		renderHome(w, absoluteData, repos)
 	})
 
-	// Routes under /repo/
-	//   /repo/<name>              → repo overview (root tree + commits)
-	//   /repo/<name>/tree/<path>  → directory listing
-	//   /repo/<name>/blob/<path>  → file content
 	mux.HandleFunc("/repo/", func(w http.ResponseWriter, r *http.Request) {
 		rest := strings.TrimPrefix(r.URL.Path, "/repo/")
 		parts := strings.SplitN(rest, "/", 3)
@@ -85,7 +81,6 @@ func main() {
 			return
 		}
 
-		// /repo/<name>
 		if len(parts) == 1 {
 			renderRepo(w, name, repoPath)
 			return
@@ -220,7 +215,6 @@ func listTree(repoPath, treePath string) []TreeEntry {
 		if len(meta) < 3 {
 			continue
 		}
-		// parts[1] is the full path; we only want the final component for display
 		name := path.Base(parts[1])
 		entries = append(entries, TreeEntry{
 			Mode: meta[0],
@@ -242,6 +236,18 @@ func getBlob(repoPath, filePath string) (string, error) {
 	return string(out), nil
 }
 
+// tryReadme looks for common README filenames at the repository root.
+func tryReadme(repoPath string) (string, string) {
+	candidates := []string{"README.md", "Readme.md", "readme.md", "README", "README.txt"}
+	for _, name := range candidates {
+		content, err := getBlob(repoPath, name)
+		if err == nil {
+			return name, content
+		}
+	}
+	return "", ""
+}
+
 func renderHome(w http.ResponseWriter, dataDir string, repos []string) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	tmpl := template.Must(template.New("home").Parse(homeTmpl))
@@ -259,23 +265,26 @@ func renderRepo(w http.ResponseWriter, name, repoPath string) {
 
 	commits := recentCommits(repoPath, 10)
 	tree := listTree(repoPath, "")
+	readmeName, readmeContent := tryReadme(repoPath)
 	cloneURL := fmt.Sprintf("/git/%s", name)
 
 	tmpl := template.Must(template.New("repo").Parse(repoTmpl))
 	data := struct {
-		Name     string
-		CloneURL string
-		RepoPath string
-		Commits  []Commit
-		Tree     []TreeEntry
-		TreePath string
+		Name          string
+		CloneURL      string
+		RepoPath      string
+		Commits       []Commit
+		Tree          []TreeEntry
+		ReadmeName    string
+		ReadmeContent string
 	}{
-		Name:     name,
-		CloneURL: cloneURL,
-		RepoPath: repoPath,
-		Commits:  commits,
-		Tree:     tree,
-		TreePath: "",
+		Name:          name,
+		CloneURL:      cloneURL,
+		RepoPath:      repoPath,
+		Commits:       commits,
+		Tree:          tree,
+		ReadmeName:    readmeName,
+		ReadmeContent: readmeContent,
 	}
 	if err := tmpl.Execute(w, data); err != nil {
 		log.Printf("template error: %v", err)
@@ -394,6 +403,17 @@ const repoTmpl = `<!DOCTYPE html>
     td.mode { width: 4.5rem; font-family: ui-monospace, monospace; color: #666; }
     .empty { color: #666; }
     .dir { font-weight: 500; }
+    .readme {
+      background: #f6f8fa;
+      border: 1px solid #d0d7de;
+      border-radius: 6px;
+      padding: 1rem 1.2rem;
+      margin-top: 1.5rem;
+      white-space: pre-wrap;
+      font-size: 0.9rem;
+      line-height: 1.5;
+    }
+    .readme-title { font-size: 0.85rem; color: #666; margin-bottom: 0.5rem; }
   </style>
 </head>
 <body>
@@ -404,6 +424,11 @@ const repoTmpl = `<!DOCTYPE html>
     <strong>Clone</strong><br>
     <code>git clone http://localhost:3000{{.CloneURL}}</code>
   </div>
+
+  {{if .ReadmeContent}}
+  <div class="readme-title">{{.ReadmeName}}</div>
+  <div class="readme">{{.ReadmeContent}}</div>
+  {{end}}
 
   <h2>Files</h2>
   {{if .Tree}}

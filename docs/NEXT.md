@@ -6,14 +6,14 @@
 - Git smart HTTP
 - Repository view page
 - Recent commits
-- File tree at HEAD
+- File tree + directory navigation
 - Blob / file view
-- **Directory navigation** (click folders to browse into them)
+- **README rendering** (shows README.md / README / etc. on the repo page)
 
 ## Possible next chunks
-1. Render README.md on the repo page when present
-2. Create-repository form
-3. Breadcrumb path on tree/blob pages
-4. Light syntax highlighting (optional)
+1. Create-repository form (so you don't need the command line)
+2. Breadcrumb path on tree/blob pages
+3. Very light Markdown rendering for the README (optional)
+4. Simple auth later if needed
 
-You can now fully navigate the repository tree and open any file.
+Core browse + clone + README workflow is complete.
