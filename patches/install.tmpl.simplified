@@ -1,0 +1,61 @@
+{{template "base/head" .}}
+<div role="main" aria-label="{{.Title}}" class="page-content install">
+	<div class="ui grid install-config-container">
+		<div class="sixteen wide center aligned centered column">
+			<h3 class="ui top attached header">
+				{{ctx.Locale.Tr "install.title"}}
+			</h3>
+			<div class="ui attached segment">
+				{{template "base/alert" .}}
+
+				<form class="ui form" action="{{AppSubUrl}}/" method="post">
+					{{.CsrfTokenHtml}}
+
+					<!-- forgejo-simple: minimal install – only the essential fields -->
+
+					<h4 class="ui dividing header">Instance</h4>
+					<div class="inline required field {{if .Err_AppName}}error{{end}}">
+						<label for="app_name">{{ctx.Locale.Tr "install.app_name"}}</label>
+						<input id="app_name" name="app_name" value="{{if .app_name}}{{.app_name}}{{else}}Forgejo Simple{{end}}" required>
+					</div>
+
+					<h4 class="ui dividing header">{{ctx.Locale.Tr "install.admin_setting"}}</h4>
+					<div class="inline required field {{if .Err_AdminName}}error{{end}}">
+						<label for="admin_name">{{ctx.Locale.Tr "install.admin_name"}}</label>
+						<input id="admin_name" name="admin_name" value="{{.admin_name}}" required autocomplete="username">
+					</div>
+					<div class="inline required field {{if .Err_AdminPasswd}}error{{end}}">
+						<label for="admin_passwd">{{ctx.Locale.Tr "install.admin_password"}}</label>
+						<input id="admin_passwd" name="admin_passwd" type="password" required autocomplete="new-password">
+					</div>
+					<div class="inline required field {{if .Err_AdminPasswd}}error{{end}}">
+						<label for="admin_confirm_passwd">{{ctx.Locale.Tr "install.confirm_password"}}</label>
+						<input id="admin_confirm_passwd" name="admin_confirm_passwd" type="password" required autocomplete="new-password">
+					</div>
+					<div class="inline field {{if .Err_AdminEmail}}error{{end}}">
+						<label for="admin_email">{{ctx.Locale.Tr "install.admin_email"}}</label>
+						<input id="admin_email" name="admin_email" type="email" value="{{.admin_email}}" autocomplete="email">
+					</div>
+
+					<!-- Hidden defaults – SQLite only, sensible paths -->
+					<input type="hidden" name="db_type" value="sqlite3">
+					<input type="hidden" name="db_path" value="data/forgejo.db">
+					<input type="hidden" name="repo_root_path" value="data/forgejo-repositories">
+					<input type="hidden" name="lfs_root_path" value="data/lfs">
+					<input type="hidden" name="run_user" value="git">
+					<input type="hidden" name="domain" value="localhost">
+					<input type="hidden" name="ssh_port" value="22">
+					<input type="hidden" name="http_port" value="3000">
+					<input type="hidden" name="app_url" value="http://localhost:3000/">
+					<input type="hidden" name="app_data_path" value="data">
+
+					<div class="ui divider"></div>
+					<div class="inline field">
+						<button class="ui primary button" type="submit">{{ctx.Locale.Tr "install.install_btn_label"}}</button>
+					</div>
+				</form>
+			</div>
+		</div>
+	</div>
+</div>
+{{template "base/footer" .}}

@@ -1,19 +1,20 @@
-# Current Next Action
+# Current Status (Option 2 active)
 
-**Retry environment → then Chunk G3**
+Because the live build environment has been unavailable for a long time, we switched to writing complete ready-to-apply files.
 
-The build sandbox is still reporting no capacity.
+## Files now in the repository
 
-### Already achieved
-- Real code change exists (from earlier successful window):
-  - `getSupportedDbTypeNames()` forced to SQLite3 only
-  - Committed on branch `forgejo-simple-minimal`
+- `patches/install.tmpl.simplified`  
+  Full minimal install page (only Title + Admin fields + hidden SQLite defaults)
 
-### Waiting for
-Capacity so we can:
-1. Confirm/re-clone the source if needed
-2. Edit `templates/install.tmpl` (Chunk G3)
-3. Build and test (G4)
-4. Push real source to this repository (H)
+- `patches/install.go.sqlite-only-snippet.md`  
+  Exact Go changes needed in the install handler
 
-Say **Next** to check again.
+## Next actions when environment returns
+1. Clone Forgejo v16.0.3
+2. Replace `templates/install.tmpl` with the simplified version
+3. Apply the Go snippet
+4. Build and test
+5. Push the real source
+
+Say **Next** to check the environment again, or continue refining the patches.

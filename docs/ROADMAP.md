@@ -1,19 +1,17 @@
 # Roadmap
 
 ## Completed
-- [x] Chunk A – Foundation
-- [x] Chunk B – Design first change
-- [x] Chunk C – Make design actionable
-- [x] Chunk D – Clean repository structure
-- [x] Chunk E – Precise before/after
-- [x] Chunk F / F2 – Environment recovered (temporarily)
-- [x] Chunk G1 – Clone Forgejo v16.0.3 + branch
-- [x] Chunk G2 – Force SQLite3-only in install handler (real code commit)
+- [x] Chunks A–E – Design & documentation
+- [x] Chunk F/F2 – Environment recovered (temporarily)
+- [x] Chunk G1 – Clone + branch (earlier session)
+- [x] Chunk G2 – Force SQLite-only in handler (earlier session)
+- [x] Option 2 – Wrote complete simplified `install.tmpl` and Go change snippets into the repo
 
-## Currently blocked
-- [ ] Chunk G3 – Simplify install template (capacity lost again)
-- [ ] Chunk G4 – Build and test
-- [ ] Chunk H – Push real modified source to GitHub
+## Waiting for environment
+- [ ] Apply the ready-made files to a real source tree
+- [ ] Build & test
+- [ ] Push full modified source to this repository
 
 ## Later
-- [ ] Chunk I – Further simplification
+- [ ] MINIMAL feature flag
+- [ ] Zero-config mode
