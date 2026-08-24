@@ -4,12 +4,13 @@
 - Basic HTTP server
 - Repository list
 - Git smart HTTP
-- **Simple repository view page** (`/repo/<name>`)
+- Simple repository view page
+- **Recent commits list** (last 10 commits on the repo page)
 
-## Next possible chunks
-1. Show recent commits on the repo page
-2. Very basic file tree / blob view
-3. "Create repository" form (optional)
-4. Tiny amount of CSS polish or dark mode
+## Possible next chunks
+1. Basic file tree / blob view
+2. Create-repository form
+3. Show author on commits (already parsed, just not displayed yet)
+4. Very light polish or README rendering
 
-The forge is already usable for basic hosting + cloning.
+The forge is already useful for day-to-day hosting and browsing.

@@ -13,6 +13,13 @@ import (
 	"strings"
 )
 
+type Commit struct {
+	Hash    string
+	Subject string
+	Author  string
+	Date    string
+}
+
 func main() {
 	addr := flag.String("addr", ":3000", "HTTP listen address")
 	dataDir := flag.String("data", "./data", "Directory that holds Git repositories")
@@ -32,7 +39,6 @@ func main() {
 
 	mux := http.NewServeMux()
 
-	// Home page – list repositories
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/" {
 			http.NotFound(w, r)
@@ -46,7 +52,6 @@ func main() {
 		renderHome(w, absoluteData, repos)
 	})
 
-	// Repository view page: /repo/<name>
 	mux.HandleFunc("/repo/", func(w http.ResponseWriter, r *http.Request) {
 		name := strings.TrimPrefix(r.URL.Path, "/repo/")
 		name = filepath.Clean(name)
@@ -64,7 +69,6 @@ func main() {
 		renderRepo(w, name, repoPath)
 	})
 
-	// Git smart HTTP – /git/<name>.git/...
 	mux.Handle("/git/", gitSmartHTTP(absoluteData))
 
 	log.Printf("forgejo-simple listening on %s", *addr)
@@ -81,7 +85,6 @@ func gitSmartHTTP(projectRoot string) http.Handler {
 		if pathInfo == "" {
 			pathInfo = "/"
 		}
-
 		handler := &cgi.Handler{
 			Path: "git",
 			Args: []string{"http-backend"},
@@ -123,6 +126,34 @@ func fileExists(path string) bool {
 	return err == nil
 }
 
+func recentCommits(repoPath string, n int) []Commit {
+	// format: hash<TAB>subject<TAB>author<TAB>date
+	cmd := exec.Command("git", "log", fmt.Sprintf("-%d", n), "--pretty=format:%h%x09%s%x09%an%x09%ad", "--date=short")
+	cmd.Dir = repoPath
+	out, err := cmd.Output()
+	if err != nil {
+		return nil
+	}
+
+	var commits []Commit
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		if line == "" {
+			continue
+		}
+		parts := strings.SplitN(line, "\t", 4)
+		if len(parts) < 4 {
+			continue
+		}
+		commits = append(commits, Commit{
+			Hash:    parts[0],
+			Subject: parts[1],
+			Author:  parts[2],
+			Date:    parts[3],
+		})
+	}
+	return commits
+}
+
 func renderHome(w http.ResponseWriter, dataDir string, repos []string) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	tmpl := template.Must(template.New("home").Parse(homeTmpl))
@@ -138,27 +169,20 @@ func renderHome(w http.ResponseWriter, dataDir string, repos []string) {
 func renderRepo(w http.ResponseWriter, name, repoPath string) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 
-	// Try to get a short description from the most recent commit subject
-	desc := ""
-	cmd := exec.Command("git", "log", "-1", "--pretty=%s")
-	cmd.Dir = repoPath
-	if out, err := cmd.Output(); err == nil {
-		desc = strings.TrimSpace(string(out))
-	}
-
+	commits := recentCommits(repoPath, 10)
 	cloneURL := fmt.Sprintf("/git/%s", name)
 
 	tmpl := template.Must(template.New("repo").Parse(repoTmpl))
 	data := struct {
-		Name        string
-		Description string
-		CloneURL    string
-		RepoPath    string
+		Name     string
+		CloneURL string
+		RepoPath string
+		Commits  []Commit
 	}{
-		Name:        name,
-		Description: desc,
-		CloneURL:    cloneURL,
-		RepoPath:    repoPath,
+		Name:     name,
+		CloneURL: cloneURL,
+		RepoPath: repoPath,
+		Commits:  commits,
 	}
 	if err := tmpl.Execute(w, data); err != nil {
 		log.Printf("template error: %v", err)
@@ -211,26 +235,44 @@ const repoTmpl = `<!DOCTYPE html>
     :root { font-family: system-ui, -apple-system, sans-serif; }
     body { max-width: 42rem; margin: 2rem auto; padding: 0 1rem; color: #222; }
     h1 { font-size: 1.4rem; margin-bottom: 0.25rem; }
+    h2 { font-size: 1.1rem; margin-top: 2rem; margin-bottom: 0.5rem; }
     .meta { color: #666; font-size: 0.9rem; margin-bottom: 1.5rem; }
     a { color: #0969da; text-decoration: none; }
     a:hover { text-decoration: underline; }
     code { background: #f6f8fa; padding: 0.15em 0.4em; border-radius: 4px; font-size: 0.9em; }
     .box { background: #f6f8fa; border: 1px solid #d0d7de; border-radius: 6px; padding: 0.8rem 1rem; margin: 1rem 0; }
     .back { font-size: 0.9rem; margin-bottom: 1rem; display: inline-block; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+    td { padding: 0.4rem 0.5rem 0.4rem 0; border-bottom: 1px solid #eee; vertical-align: top; }
+    td.hash { width: 5.5rem; font-family: ui-monospace, monospace; color: #666; }
+    td.date { width: 6.5rem; color: #666; white-space: nowrap; }
+    .empty { color: #666; }
   </style>
 </head>
 <body>
   <a class="back" href="/">← all repositories</a>
   <h1>{{.Name}}</h1>
-  {{if .Description}}
-  <p class="meta">{{.Description}}</p>
-  {{end}}
 
   <div class="box">
     <strong>Clone</strong><br>
     <code>git clone http://localhost:3000{{.CloneURL}}</code>
   </div>
 
-  <p class="meta">Path on disk: <code>{{.RepoPath}}</code></p>
+  <h2>Recent commits</h2>
+  {{if .Commits}}
+  <table>
+    {{range .Commits}}
+    <tr>
+      <td class="hash">{{.Hash}}</td>
+      <td>{{.Subject}}</td>
+      <td class="date">{{.Date}}</td>
+    </tr>
+    {{end}}
+  </table>
+  {{else}}
+  <p class="empty">No commits yet.</p>
+  {{end}}
+
+  <p class="meta" style="margin-top:2rem">Path on disk: <code>{{.RepoPath}}</code></p>
 </body>
 </html>`
