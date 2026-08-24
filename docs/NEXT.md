@@ -2,11 +2,20 @@
 
 ## Done
 - Basic HTTP server
-- Repository list (scans `data/` for Git repos and displays them)
+- Repository list
+- **Git smart HTTP** (via `git http-backend`)
+
+You can now:
+
+```bash
+go run ./cmd/forgejo-simple
+
+# in another terminal
+git init --bare data/hello.git
+git clone http://localhost:3000/git/hello.git
+```
 
 ## Next
-1. **Git smart HTTP** – so `git clone http://localhost:3000/repo/myproject.git` works
-2. Simple repository view page (show basic info + file tree later)
-3. Optional: create-repo endpoint
-
-The home page is now useful: drop bare Git repositories into the `data/` directory and they appear automatically.
+1. Simple repository view page (show README / basic info)
+2. Optional create-repo endpoint
+3. Basic authentication later if needed
