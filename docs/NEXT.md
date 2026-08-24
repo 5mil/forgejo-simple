@@ -1,20 +1,19 @@
 # Next steps
 
 ## Done
-- Basic HTTP server
-- Repository list
+- Basic HTTP server + repo list
 - Git smart HTTP (clone / push)
 - Repository view + recent commits
-- File tree + directory navigation
+- File tree + directory navigation + breadcrumbs
 - Blob / file view
-- README rendering
 - Create repository form
-- **Breadcrumb navigation** on tree and blob pages
+- README display
+- **Light Markdown rendering** for README.md (headings, bold, italic, code, lists, links, fences)
 
 ## Possible next chunks
-1. Light Markdown rendering for README
-2. Delete repository (with confirmation)
+1. Delete repository (with confirmation)
+2. Show author on the commit list
 3. Simple optional authentication
-4. Show author on the commit list
+4. Syntax highlighting for blob view (optional)
 
-Core UX for browsing is now polished with proper path breadcrumbs.
+The forge is feature-complete for basic daily use.
